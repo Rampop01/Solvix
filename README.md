@@ -25,50 +25,60 @@ lifecycle: **issue assigned → fork → clone → understand → locate → fix
 
 ## Prerequisites
 
-### 1. IBM Bob 2.0
-- Agent mode enabled
-- Subagent spawning enabled (approve during demo or enable auto-approve)
+### Choose your environment
 
-### 2. GitHub MCP Server
-Add to Bob's MCP configuration (Settings → MCP Servers → Add):
+Solvix works with two Bob environments. Pick one — you'll be asked on first run.
 
-**Remote (recommended for demo):**
+| | Bob Shell CLI | Bob IDE |
+|---|---|---|
+| **How it works** | Runs Bob headlessly from the terminal | Opens a chat in the Bob desktop app |
+| **Where you see logs** | Right here in this terminal | In the Bob IDE chat panel |
+| **Bob API key needed** | ✅ Yes | ❌ No |
+| **Install** | `npm install -g @ibm/bob` | https://bob.ibm.com |
+
+---
+
+### Required for both environments
+
+**GitHub Personal Access Token**
+1. Go to: **https://github.com/settings/tokens**
+2. Create a token with scopes: `repo`, `workflow`
+
+**GitHub MCP Server** (configured in Bob IDE → Settings → MCP Servers → Add):
 ```json
 {
   "type": "remote",
   "url": "https://api.githubcopilot.com/mcp/",
-  "headers": {
-    "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"
-  }
+  "headers": { "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}" }
 }
 ```
-
-**Local via Docker:**
-```bash
-docker run -i --rm \
-  -e GITHUB_PERSONAL_ACCESS_TOKEN \
-  ghcr.io/github/github-mcp-server
-```
-
 Required toolsets: `repos`, `issues`, `pull_requests`, `git`
 
-### 3. GitHub PAT
-Scopes required: `repo` (full), `workflow` (if target repo uses Actions)
+---
+
+### Required for Bob Shell CLI only
+
+**Bob API Key**
+1. Go to: **https://bob.ibm.com/admin/apikeys**
+2. Create an API key
+
+---
+
+### .env file — store all credentials here
+
+Create `.env` in the Solvix directory (loaded automatically on every run):
 
 ```bash
+# For Bob Shell CLI users:
+cat > .env << 'EOF'
+export BOB_API_KEY=your_bob_api_key
 export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_your_token_here
-```
+EOF
 
-### 4. Target Repository
-Use a repo you own or a sandboxed fork. Seed it with 2–3 well-scoped issues.
-See [`demo/seed_issues.md`](demo/seed_issues.md) for templates.
-
-### 5. Runnable Test Environment
-Bob (or a subagent) must be able to execute the repo's test command.
-Docker is recommended:
-```bash
-# Example for a Node.js repo
-docker run --rm -v $(pwd):/app -w /app node:20 npm test
+# For Bob IDE users (no BOB_API_KEY needed):
+cat > .env << 'EOF'
+export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_your_token_here
+EOF
 ```
 
 ---
@@ -76,14 +86,78 @@ docker run --rm -v $(pwd):/app -w /app node:20 npm test
 ## Quick Start
 
 ```bash
-# 1. Validate environment
-./scripts/setup.sh
+# 1. Create your .env file
+cat > .env << 'EOF'
+export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_your_token_here
+export BOB_API_KEY=your_bob_api_key   # only needed for Bob Shell CLI
+EOF
 
-# 2. Run the agent on an issue
-./scripts/run_agent.sh --repo owner/repo-name --issue 42
+# 2. First run — Solvix asks which environment you're using (saved for future runs)
+./solvix --repo owner/repo-name
 
-# Or trigger manually inside Bob:
-# Open agent/orchestrator.md in Bob → Agent mode → provide REPO and ISSUE_NUMBER
+# Or: validate everything first
+./solvix setup
+
+# 3. Fix a single specific issue
+./solvix --repo owner/repo-name --issue 42
+
+# Change your environment choice at any time
+./solvix env
+```
+
+On first run, you'll see:
+
+```
+How are you running Bob?
+
+  [1] Bob Shell CLI  (terminal — live logs stream here)
+  [2] Bob IDE        (desktop app — logs appear in the IDE chat)
+
+Enter 1 or 2:
+```
+
+Your choice is saved. Every subsequent run goes straight to work — no prompts.
+
+---
+
+## What You'll See
+
+**Bob Shell CLI mode** — everything streams to the terminal:
+
+```
+╔═══════════════════════════════════════════════════════╗
+║            Solvix — Autonomous Issue Fixer            ║
+║            Mode: Bob Shell CLI  (live logs)           ║
+╚═══════════════════════════════════════════════════════╝
+
+[✓] Found 3 issue(s) assigned by Wilfred007
+──────────────────────── Bob output ────────────────────────
+
+[STEP 1 ✓] Issue #42 understood: Fix null pointer in checkout
+[STEP 2 ✓] Forked + cloned. Branch: fix/issues-42-43-44
+[STEP 3 ✓] Code located: src/checkout.ts:142
+[STEP 4 ✓] Fix applied (3 files changed)
+[STEP 5 ✓] All tests passing
+[STEP 6 ✓] PR opened → https://github.com/owner/repo/pull/99
+
+────────────────────────────────────────────────────────────
+```
+
+**Bob IDE mode** — terminal shows a pointer, logs appear in the IDE:
+
+```
+╔═══════════════════════════════════════════════════════╗
+║            Solvix — Autonomous Issue Fixer            ║
+║            Mode: Bob IDE  (watch in IDE chat)         ║
+╚═══════════════════════════════════════════════════════╝
+
+[✓] Found 3 issue(s) assigned by Wilfred007
+
+  👉  Switch to Bob IDE now — the workflow is starting in a new chat.
+     Watch the chat panel for live step-by-step progress.
+     You'll see [STEP N ✓] as each step completes.
+
+[✓] Workflow sent to Bob IDE.
 ```
 
 ---
@@ -140,11 +214,14 @@ Issue Assigned
 
 ```
 solvix/
+├── solvix                           # ← ONE-COMMAND entry point
+├── .env                             # Your credentials (BOB_API_KEY + GITHUB_PAT)
 ├── README.md
 ├── .bob/
 │   └── SKILL.md                     # Bob skill — loads agent instructions
 ├── agent/
-│   ├── orchestrator.md              # Master prompt: chains all 6 steps
+│   ├── orchestrator.md              # Master prompt: chains all 6 steps (single issue)
+│   ├── multi_orchestrator.md        # Multi-issue: one branch, one PR
 │   └── steps/
 │       ├── 01_understand_issue.md
 │       ├── 02_fork_clone.md
@@ -158,8 +235,12 @@ solvix/
 │       ├── verifier_run_tests.md
 │       └── verifier_write_tests.md
 ├── scripts/
-│   ├── run_agent.sh
-│   └── setup.sh
+│   ├── bob_launch.sh                # Bob discovery + launch helper (sourced internally)
+│   ├── run_agent.sh                 # Single-issue runner
+│   ├── run_multi.sh                 # Multi-issue runner (auto-detects assigner)
+│   ├── setup.sh                     # Environment validator (run via ./solvix setup)
+│   ├── setup_approvals.sh           # Patches ~/.bob/mcp.json — alwaysAllow
+│   └── discover_issues.sh           # Debug: list issues by assigner
 └── demo/
     ├── seed_issues.md
     └── demo_script.md
@@ -167,11 +248,27 @@ solvix/
 
 ---
 
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| **First run doesn't ask for environment choice** | Run `./solvix env` to trigger the picker manually |
+| **Want to switch from CLI to IDE (or back)** | Run `./solvix env` and pick again — saved immediately |
+| `Bob API key is required` | CLI mode only: add `BOB_API_KEY` to `.env` from https://bob.ibm.com/admin/apikeys |
+| **No terminal output, nothing happening** | You're in IDE mode — switch to Bob IDE and check the Chat panel |
+| **Bob IDE chat didn't open** | Bob IDE may not be running — open it first, then re-run |
+| `GITHUB_PERSONAL_ACCESS_TOKEN is not set` | Add it to `.env` — create at https://github.com/settings/tokens |
+| `PAT missing 'repo' scope` | Regenerate token with `repo` and `workflow` scopes |
+| **Bob Shell CLI not found** | Install: `npm install -g @ibm/bob` then add `BOB_API_KEY` to `.env` |
+| Issues not found | Run `./scripts/discover_issues.sh --repo owner/repo --assigned-by username` |
+
+---
+
 ## Demo Flow (3–5 min)
 
 1. Show the seeded repo and a clearly written open issue
-2. Run `./scripts/run_agent.sh --repo owner/repo --issue N`
-3. Narrate each logged step as it streams
+2. Run `./solvix --repo owner/repo`
+3. Narrate each logged step as it streams to the terminal
 4. Highlight the two parallel subagent pairs (locate + verify)
 5. Show the opened PR: diff, description, `Closes #N`
 6. Show before/after step count
