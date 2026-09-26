@@ -95,24 +95,38 @@ export AGENT_FORK_OWNER="$FORK_OWNER"
 export AGENT_BRANCH="$BRANCH"
 export AGENT_TEST_CMD="$TEST_CMD"
 
-# ── Instructions ──────────────────────────────────────────────────────────────
-echo -e "${BOLD}Next steps:${RESET}"
+# ── Launch Bob (foreground — live logs stream to this terminal) ───────────────
+# shellcheck source=scripts/bob_launch.sh
+source "$(dirname "${BASH_SOURCE[0]}")/bob_launch.sh"
+
+BOB_MESSAGE="REPO=${REPO}
+ISSUE_NUMBER=${ISSUE_NUMBER}
+FORK_OWNER=${FORK_OWNER}
+BRANCH=${BRANCH}
+TEST_CMD=${TEST_CMD}
+
+Please read agent/orchestrator.md and execute the full single-issue workflow with these variables."
+
+ok "Starting workflow — Bob output will stream below."
+echo -e "  Issue  : ${CYAN}#${ISSUE_NUMBER}${RESET} in ${CYAN}${REPO}${RESET}"
+echo -e "  Branch : ${CYAN}${BRANCH}${RESET}"
 echo ""
-echo "  1. Open IBM Bob 2.0 in this directory."
-echo "  2. Activate the skill:  type  'use skill solvix'"
-echo "  3. Open agent/orchestrator.md in Bob → Agent mode."
-echo "  4. Provide the following when prompted:"
-echo ""
-echo "       REPO=$REPO"
-echo "       ISSUE_NUMBER=$ISSUE_NUMBER"
-echo "       FORK_OWNER=$FORK_OWNER"
-echo "       TEST_CMD=$TEST_CMD"
-echo "       BRANCH=$BRANCH"
-echo ""
-echo "  5. Approve subagent spawns as they appear (Step 3 and Step 5 each"
-echo "     spawn 2 parallel subagents)."
-echo ""
-echo "  The agent will log each step with [STEP N ✓] as it completes."
-echo "  When done, it will print the PR URL."
-echo ""
-log "Ready. Start Bob and follow the instructions above."
+
+if ! bob_run "$(pwd)/agent/orchestrator.md" "$BOB_MESSAGE"; then
+  echo ""
+  warn "Bob was not found automatically."
+  echo ""
+  echo "  Set the path manually and re-run:"
+  echo "    export BOB_APP_PATH=\"/path/to/IBM Bob.app\""
+  echo ""
+  echo "  Or paste these variables into Bob manually:"
+  echo ""
+  echo "       REPO=$REPO"
+  echo "       ISSUE_NUMBER=$ISSUE_NUMBER"
+  echo "       FORK_OWNER=$FORK_OWNER"
+  echo "       TEST_CMD=$TEST_CMD"
+  echo "       BRANCH=$BRANCH"
+  echo ""
+  echo "  Then open agent/orchestrator.md in Bob → Agent mode."
+  exit 1
+fi
