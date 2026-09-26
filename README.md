@@ -1,5 +1,5 @@
 # Solvix
-### IBM Bob 2.0 Hackathon — Project 2
+### IBM Bob 2.0 Hackathon — Solvix
 
 An agentic workflow built on **IBM Bob 2.0** that automates the full contributor-side
 lifecycle: **issue assigned → fork → clone → understand → locate → fix → verify → PR**.
