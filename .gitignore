@@ -1,0 +1,9 @@
+# Credentials — never commit these
+.env
+.solvix_env
+
+# macOS
+.DS_Store
+
+# Cloned target repos (checked out during agent runs)
+PayD/
