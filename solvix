@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# =============================================================================
+# solvix — One-command autonomous GitHub issue fixer
+# =============================================================================
+#
+# USAGE
+#   ./solvix --repo owner/repo                   # fix all issues assigned to you
+#   ./solvix --repo owner/repo --issue 42         # fix one specific issue
+#   ./solvix --repo owner/repo --assigned-by user # filter to a specific assigner
+#   ./solvix setup                                # validate environment
+#   ./solvix env                                  # re-run the environment picker
+#
+# OPTIONS
+#   --repo         owner/repo          (required)
+#   --issue        N                   fix a single issue instead of all
+#   --assigned-by  github-username     filter multi-issue run to one assigner
+#   --test-cmd     "pytest"            override auto-detected test command
+# =============================================================================
+
+set -uo pipefail
+
+SOLVIX_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOLVIX_ENV_FILE="${SOLVIX_DIR}/.solvix_env"
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+
+die()  { echo -e "${RED}[✗]${RESET} $*" >&2; exit 1; }
+log()  { echo -e "${CYAN}[solvix]${RESET} $*"; }
+ok()   { echo -e "${GREEN}[✓]${RESET} $*"; }
+warn() { echo -e "${YELLOW}[!]${RESET} $*"; }
+
+# ── Auto-load .env ────────────────────────────────────────────────────────────
+[[ -f "${SOLVIX_DIR}/.env" ]] && { set -a; source "${SOLVIX_DIR}/.env"; set +a; }
+
+# ── Environment mode picker ───────────────────────────────────────────────────
+# Saved in .solvix_env as SOLVIX_MODE=cli or SOLVIX_MODE=ide
+# Run `./solvix env` to re-run the picker and change the saved choice.
+
+_run_env_picker() {
+  echo ""
+  echo -e "${BOLD}╔═══════════════════════════════════════════════════════╗${RESET}"
+  echo -e "${BOLD}║           Solvix — Environment Setup                  ║${RESET}"
+  echo -e "${BOLD}╚═══════════════════════════════════════════════════════╝${RESET}"
+  echo ""
+  echo -e "  How are you running Bob?"
+  echo ""
+  echo -e "  ${BOLD}[1] Bob Shell CLI${RESET}  (terminal — ${GREEN}live logs stream here${RESET})"
+  echo -e "      • Install: ${CYAN}npm install -g @ibm/bob${RESET}"
+  echo -e "      • Requires: ${BOLD}BOB_API_KEY${RESET} from https://bob.ibm.com/admin/apikeys"
+  echo -e "      • Output: every step prints directly in this terminal"
+  echo ""
+  echo -e "  ${BOLD}[2] Bob IDE${RESET}        (desktop app — ${YELLOW}logs appear in the IDE chat${RESET})"
+  echo -e "      • Install: https://bob.ibm.com"
+  echo -e "      • Requires: Bob IDE open and logged in"
+  echo -e "      • Output: Solvix opens a new chat in Bob IDE — watch it there"
+  echo ""
+  echo -ne "  ${BOLD}Enter 1 or 2: ${RESET}"
+  read -r CHOICE
+
+  case "$CHOICE" in
+    1)
+      SOLVIX_MODE="cli"
+      echo "SOLVIX_MODE=cli" > "$SOLVIX_ENV_FILE"
+      echo ""
+      ok "Mode saved: ${BOLD}Bob Shell CLI${RESET}"
+      echo -e "  Live logs will stream to this terminal on every run."
+      echo ""
+      echo -e "  Make sure your ${BOLD}.env${RESET} contains:"
+      echo -e "    ${CYAN}export BOB_API_KEY=your_key_here${RESET}          ← from https://bob.ibm.com/admin/apikeys"
+      echo -e "    ${CYAN}export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...${RESET}"
+      echo ""
+      echo -e "  Run ${BOLD}./solvix setup${RESET} to validate your environment."
+      ;;
+    2)
+      SOLVIX_MODE="ide"
+      echo "SOLVIX_MODE=ide" > "$SOLVIX_ENV_FILE"
+      echo ""
+      ok "Mode saved: ${BOLD}Bob IDE${RESET}"
+      echo -e "  When you run a command, Solvix will open a new chat in Bob IDE."
+      echo -e "  ${YELLOW}Switch to Bob IDE to follow the workflow live.${RESET}"
+      echo ""
+      echo -e "  Make sure your ${BOLD}.env${RESET} contains:"
+      echo -e "    ${CYAN}export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...${RESET}"
+      echo -e "  ${BOLD}BOB_API_KEY is not required for IDE mode.${RESET}"
+      echo ""
+      echo -e "  Run ${BOLD}./solvix setup${RESET} to validate your environment."
+      ;;
+    *)
+      echo ""
+      warn "Invalid choice. Run ${BOLD}./solvix env${RESET} to try again."
+      exit 1
+      ;;
+  esac
+  echo ""
+}
+
+# Load saved mode (if exists)
+SOLVIX_MODE=""
+[[ -f "$SOLVIX_ENV_FILE" ]] && source "$SOLVIX_ENV_FILE"
+
+# ── Subcommand: env — re-run the picker ───────────────────────────────────────
+if [[ "${1:-}" == "env" ]]; then
+  _run_env_picker
+  exit 0
+fi
+
+# ── Subcommand: setup ─────────────────────────────────────────────────────────
+if [[ "${1:-}" == "setup" ]]; then
+  # Export mode so setup.sh can tailor its checks
+  export SOLVIX_MODE
+  bash "${SOLVIX_DIR}/scripts/setup.sh"
+  echo ""
+  bash "${SOLVIX_DIR}/scripts/setup_approvals.sh"
+  exit $?
+fi
+
+# ── First-run: show picker if no mode saved ───────────────────────────────────
+if [[ -z "$SOLVIX_MODE" ]]; then
+  echo ""
+  log "First run detected — let's configure your environment."
+  _run_env_picker
+fi
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+REPO=""
+ISSUE=""
+ASSIGNED_BY=""
+TEST_CMD=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo)         REPO="$2";        shift 2 ;;
+    --issue)        ISSUE="$2";       shift 2 ;;
+    --assigned-by)  ASSIGNED_BY="$2"; shift 2 ;;
+    --test-cmd)     TEST_CMD="$2";    shift 2 ;;
+    --help|-h)
+      sed -n '/^# USAGE/,/^#.*====/p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) die "Unknown argument: $1. Run ./solvix --help for usage." ;;
+  esac
+done
+
+[[ -z "$REPO" ]] && die "--repo is required (e.g. ./solvix --repo Gildado/PayD)"
+[[ -z "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" ]] && \
+  die "GITHUB_PERSONAL_ACCESS_TOKEN is not set.\n  Add it to .env or run: export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_..."
+
+# ── Header ────────────────────────────────────────────────────────────────────
+echo ""
+echo -e "${BOLD}╔═══════════════════════════════════════════════════════╗${RESET}"
+echo -e "${BOLD}║            Solvix — Autonomous Issue Fixer            ║${RESET}"
+if [[ "$SOLVIX_MODE" == "cli" ]]; then
+echo -e "${BOLD}║            Mode: Bob Shell CLI  (live logs)           ║${RESET}"
+else
+echo -e "${BOLD}║            Mode: Bob IDE  (watch in IDE chat)         ║${RESET}"
+fi
+echo -e "${BOLD}╚═══════════════════════════════════════════════════════╝${RESET}"
+echo ""
+
+# Export mode so bob_launch.sh can use it
+export SOLVIX_MODE
+
+# ── Route to the right script ─────────────────────────────────────────────────
+if [[ -n "$ISSUE" ]]; then
+  log "Mode: single issue (#${ISSUE})"
+  ARGS=(--repo "$REPO" --issue "$ISSUE")
+  [[ -n "$TEST_CMD" ]] && ARGS+=(--test-cmd "$TEST_CMD")
+  exec bash "${SOLVIX_DIR}/scripts/run_agent.sh" "${ARGS[@]}"
+else
+  log "Mode: multi-issue (all assigned issues in ${REPO})"
+  ARGS=(--repo "$REPO")
+  [[ -n "$ASSIGNED_BY" ]] && ARGS+=(--assigned-by "$ASSIGNED_BY")
+  [[ -n "$TEST_CMD" ]]    && ARGS+=(--test-cmd "$TEST_CMD")
+  exec bash "${SOLVIX_DIR}/scripts/run_multi.sh" "${ARGS[@]}"
+fi
